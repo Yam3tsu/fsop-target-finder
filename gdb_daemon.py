@@ -26,6 +26,7 @@ STD_STREAMS = ["stdin", "stdout", "stderr"]
 
 STRONG_CHECK = False
 DEBUG = True
+INTERACTIVE = False
 
 # Stream interface
 class Stream(TypedDict):
@@ -219,4 +220,5 @@ for addr in range(vtable_start, vtable_end, 0x8):
 debug_print(f"Executing the script:\n{call_script}")
 
 # call_script = "b __run_exit_handlers\n" + call_script
-gdb.execute(call_script)
+if INTERACTIVE == False:
+    gdb.execute(call_script)
