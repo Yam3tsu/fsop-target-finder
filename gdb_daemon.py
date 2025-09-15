@@ -117,6 +117,8 @@ def parse_stream():
                     unused_list += f"{elem}, "
                 unused_list = unused_list[:-2] + "}"
                 gdb.execute(f"set (char [20])$stream->_unused2 = {unused_list}")
+            elif element == "vtable":
+                gdb.execute(f"set ((struct _IO_FILE_plus *)$stream)->{element} = {hex(STREAM[element])}")
             else:
                 gdb.execute(f"set $stream->{element} = {hex(STREAM[element])}")
     else:

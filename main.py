@@ -156,9 +156,6 @@ if __name__ == "__main__":
         parsed = ""
         lines = args.stream_file.readlines()
         for line in lines:
-            if line == "}":
-                parsed = parsed[:-2] + "\n}"
-                break
             m = re.match(HEX_IN_JSON_R, line)
             if m != None:
                 parsed += f"{m.group(1)}{int(m.group(2), 16)}"
@@ -167,6 +164,9 @@ if __name__ == "__main__":
                 parsed += "\n"
             else:
                 parsed += f"{line}\n"
+        # We need to remove the last comma or json.loads will cry a river
+        to_remove = parsed.rfind(",")
+        parsed = parsed[:to_remove] + parsed[to_remove+1:]
         debug_print(f"Loading the parsed json:\n{parsed}")
         stream = json.loads(parsed)
 

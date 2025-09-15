@@ -10,5 +10,6 @@
  "_IO_buf_end": 0,
  "_IO_save_base": 0,
  "_IO_backup_base": 0,
- "_IO_save_end": 0
+ "_IO_save_end": 0,
+ "vtable": 0xbadc0ffe
 }
