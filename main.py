@@ -1,0 +1,192 @@
+#!/usr/bin/python3
+
+import argparse
+import json
+import subprocess
+import os
+import re
+
+DAEMON = os.getcwd() + "/gdb_daemon.py"
+OFFSET_R = re.compile(r"^Offset: (0x[0-9a-f]+)$")
+SYMBOL_R = re.compile(r"^Function: ([a-zA-Z_]+)$")
+HEX_IN_JSON_R = re.compile(r'^(\s*"[a-zA-Z0-9_]+": )(0x[0-9a-zA-Z]+),?$')
+PARAMS_FILE = "./param.txt"
+STD_STREAMS = ["stdin", "stdout", "stderr"]
+DEBUG = False
+
+FIND_TARGET_DESCRIPTION = '''
+Given a libc function which act on file stream, this tool should retrive the offset of the vtable function
+called. The goal is to make FILE struct exploitation easier by avoiding to dive into libc source code
+'''
+
+TARGET_HELP = '''The target function call passed as function(arg1, arg2, ...)
+function: The target function
+arg[number] Can be an hardcoded value or one of the following alias:
+BUFFER[SIZE]    replace the argument with the address of a buffer allocated using malloc(SIZE)
+BUFFER          alias for BUFFER[0x10]
+STREAM          replace the argument with the address of the file stream
+
+To get the vtable function called the tool will call the target function using the given template
+'''
+
+STREAM_HELP = f'''The FILE stream which will be passed to the target function call
+The stream has to be passed as a json (you can obtain the ideal formatting by using json.dumps(dictionary) in python)
+This json has to be an implementation of a specific interface.
+You can get the interface using {os.path.basename(__file__)} --interface
+
+It's possible to not include all the fields.
+In that case the omitted fields will have the value of the stream generated with fopen(file_name, "rw")
+
+Example:
+{os.path.basename(__file__)} fwrite(BUFFER, 0x10, 0x1, STREAM) -s '{{"_flags": 0xfbad0000, "_IO_read_ptr": 0xdeadbeef}}'
+
+If omitted it will be replaced with stderr
+
+'''
+
+STREAM_FILE_HELP = f'''The path of a file containing a json representing the FILE stream
+The json sohuld be an implementation of a specific interface.
+You can get the interface by using {os.path.basename(__file__)} --interface
+
+'''
+
+INTERFACE_HELP = f'''Get the interface of the object passed via --stream or --stream-file
+
+'''
+
+LIBC_HELP = '''Path to the libc used by the binary
+If omitted the system libc will be used /lib/x86_64-linux-gnu/libc.so.6
+
+'''
+
+LINKER_HELP = '''Path to the dynamic loader used by the binary
+If omitted the system loader will be used /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+
+'''
+
+HELP_HELP = '''Show this help message and exit
+
+'''
+
+INTERFACE = '''
+class Stream(TypedDict):
+    _flags : int
+    _IO_read_ptr : int
+    _IO_read_end : int
+    _IO_read_base : int
+    _IO_write_base : int
+    _IO_write_ptr : int
+    _IO_write_end : int
+    _IO_buf_base : int
+    _IO_buf_end : int
+    _IO_save_base : int
+    _IO_backup_base : int
+    _IO_save_end : int
+    _markers : int
+    _chain : int
+    _fileno : int
+    _flags2 : int
+    _old_offset : int
+    _cur_column : int
+    _vtable_offset : int
+    _shortbuf : int
+    _lock : int
+    _offset : int
+    _codecvt : int
+    _wide_data : int
+    _freeres_list : int
+    _freeres_buf : int
+    __pad5 : int
+    _mode : int
+    _unused2 : bytes
+    vtable : int
+'''
+
+class ShowInterface(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string = None):
+        print(INTERFACE)
+        parser.exit()
+
+def update_params(target : str, libc : str, linker : str, stream : dict):
+    with open(PARAMS_FILE, "w") as f:
+        f.write(f"Libc: {libc}\n")
+        f.write(f"Linker: {linker}\n")
+        if stream == False or stream in STD_STREAMS:
+            f.write(f"Stream: {stream}\n")
+        else:
+            f.write(f"Stream: {json.dumps(stream)}\n")
+        f.write(f"Call: {target}")
+
+def debug_print(s : str):
+    if DEBUG == True:
+        for line in s.split("\n"):
+            print(f"[DEBUG] {line}")
+
+if __name__ == "__main__":
+
+    # Argument parsing routine
+    parser = argparse.ArgumentParser(description=FIND_TARGET_DESCRIPTION, formatter_class=argparse.RawTextHelpFormatter, add_help=False)
+    parser.add_argument("-h", "--help", action="help", help=HELP_HELP)
+    parser.add_argument("target", type=str, help=TARGET_HELP)
+    parser.add_argument("-s", "--stream", type=json.loads, default=False, help=STREAM_HELP)
+    parser.add_argument("-f", "--stream-file", type=argparse.FileType("r"), default=False, help=STREAM_FILE_HELP)
+    parser.add_argument("-std", "--standard-stream", type=str, choices=["stdin", "stdout", "stderr"], default=False)
+    parser.add_argument("--interface", nargs=0, action=ShowInterface, help=INTERFACE_HELP)
+    parser.add_argument("--libc", type=str, default="/lib/x86_64-linux-gnu/libc.so.6", help=LIBC_HELP)
+    parser.add_argument("--linker", type=str, default="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", help=LINKER_HELP)
+    
+    args = parser.parse_args()
+    target = args.target
+    stream = args.stream
+    std_stream = args.standard_stream
+    libc = args.libc
+    linker = args.linker
+
+    if args.interface == True:
+        print(INTERFACE)
+        exit(0)
+
+    if std_stream != False:
+        assert(stream == False)
+        stream = std_stream
+    
+    if args.stream_file != False:
+        assert(stream == False)
+        assert(std_stream == False)
+        parsed = ""
+        lines = args.stream_file.readlines()
+        for line in lines:
+            if line == "}":
+                parsed = parsed[:-2] + "\n}"
+                break
+            m = re.match(HEX_IN_JSON_R, line)
+            if m != None:
+                parsed += f"{m.group(1)}{int(m.group(2), 16)}"
+                if not "}" in line:
+                    parsed += ","
+                parsed += "\n"
+            else:
+                parsed += f"{line}\n"
+        debug_print(f"Loading the parsed json:\n{parsed}")
+        stream = json.loads(parsed)
+
+    update_params(target, libc, linker, stream)
+
+    # Run gdb
+    out = subprocess.run(
+        ["gdb", "-q", "--nx", "-ex", "set debuginfod enabled on", "-ex", f"source {DAEMON}"],
+        capture_output=True
+    ).stdout.decode()
+    
+    debug_print(f"Output of gdb daemon:\n{out}")
+
+    for line in out.split("\n"):
+        m = re.match(OFFSET_R, line)
+        if m != None:
+            offset = int(m.group(1), 16)
+            continue
+        m = re.match(SYMBOL_R, line)
+        if m != None:
+            symbol = m.group(1)
+    
+    print(f"Offset: {hex(offset)}\nSymbol: {symbol}")

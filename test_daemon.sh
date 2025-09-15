@@ -1,0 +1,1 @@
+gdb -q --nx -ex "set debuginfod enable on" -ex "source gdb_daemon.py"
