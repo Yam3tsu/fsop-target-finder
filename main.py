@@ -10,9 +10,11 @@ DAEMON = os.getcwd() + "/gdb_daemon.py"
 OFFSET_R = re.compile(r"^Offset: (0x[0-9a-f]+)$")
 SYMBOL_R = re.compile(r"^Function: ([a-zA-Z_]+)$")
 HEX_IN_JSON_R = re.compile(r'^(\s*"[a-zA-Z0-9_]+": )(0x[0-9a-zA-Z]+),?$')
+JSON_CLOSE_R = re.compile(r"^\s*}\s*$")
 PARAMS_FILE = "./param.txt"
+CUSTOM_STREAMS_PATH = f"{os.getcwd()}/custom_streams/"
 STD_STREAMS = ["stdin", "stdout", "stderr"]
-DEBUG = False
+DEBUG = True
 
 FIND_TARGET_DESCRIPTION = '''
 Given a libc function which act on file stream, this tool should retrive the offset of the vtable function
@@ -47,6 +49,17 @@ If omitted it will be replaced with stderr
 STREAM_FILE_HELP = f'''The path of a file containing a json representing the FILE stream
 The json sohuld be an implementation of a specific interface.
 You can get the interface by using {os.path.basename(__file__)} --interface
+
+'''
+
+STD_HELP = '''This option allows to quickly use one of the 3 standard stream
+
+'''
+
+CUSTOM_HELP = f'''This option allows to use one of the premaid custom streams. 
+These streams are located at {CUSTOM_STREAMS_PATH}.
+An example of premade stream is the exit stream. This is a stream on which exit will call a function from the vtable.
+To get more detail about the exit read the docs
 
 '''
 
@@ -122,6 +135,9 @@ def debug_print(s : str):
         for line in s.split("\n"):
             print(f"[DEBUG] {line}")
 
+def get_custom_choices():
+    return os.listdir("./custom_streams")
+
 if __name__ == "__main__":
 
     # Argument parsing routine
@@ -130,7 +146,8 @@ if __name__ == "__main__":
     parser.add_argument("target", type=str, help=TARGET_HELP)
     parser.add_argument("-s", "--stream", type=json.loads, default=False, help=STREAM_HELP)
     parser.add_argument("-f", "--stream-file", type=argparse.FileType("r"), default=False, help=STREAM_FILE_HELP)
-    parser.add_argument("-std", "--standard-stream", type=str, choices=["stdin", "stdout", "stderr"], default=False)
+    parser.add_argument("-std", "--standard-stream", type=str, choices=["stdin", "stdout", "stderr"], default=False, help=STD_HELP)
+    parser.add_argument("-custom", "--custom-stream", type=str, choices=get_custom_choices(), default=False, help=CUSTOM_HELP)
     parser.add_argument("--interface", nargs=0, action=ShowInterface, help=INTERFACE_HELP)
     parser.add_argument("--libc", type=str, default="/lib/x86_64-linux-gnu/libc.so.6", help=LIBC_HELP)
     parser.add_argument("--linker", type=str, default="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", help=LINKER_HELP)
@@ -146,6 +163,12 @@ if __name__ == "__main__":
         print(INTERFACE)
         exit(0)
 
+    if args.custom_stream != False:
+        assert(stream == False)
+        assert(std_stream == False)
+        assert(args.stream_file == False)
+        args.stream_file = open(CUSTOM_STREAMS_PATH + args.custom_stream, "r")
+
     if std_stream != False:
         assert(stream == False)
         stream = std_stream
@@ -153,20 +176,34 @@ if __name__ == "__main__":
     if args.stream_file != False:
         assert(stream == False)
         assert(std_stream == False)
-        parsed = ""
-        lines = args.stream_file.readlines()
+        parsed = "{"
+        lines : list = args.stream_file.readlines()
+        # Removing empty lines
+        while True:
+            try:
+                lines.remove("\n")
+            except:
+                break
+        lines_number = len(lines)
+        counter = 0
         for line in lines:
+            if re.match(JSON_CLOSE_R, line) != None:
+                break
+            if counter == 0:
+                line = line.replace("{", "")
+            if counter == lines_number - 1:
+                line = line.replace("}", "")
+            counter += 1
             m = re.match(HEX_IN_JSON_R, line)
             if m != None:
-                parsed += f"{m.group(1)}{int(m.group(2), 16)}"
-                if not "}" in line:
-                    parsed += ","
-                parsed += "\n"
+                parsed += f"{m.group(1)}{int(m.group(2), 16)},"
             else:
-                parsed += f"{line}\n"
+                parsed += f"{line}"
         # We need to remove the last comma or json.loads will cry a river
-        to_remove = parsed.rfind(",")
-        parsed = parsed[:to_remove] + parsed[to_remove+1:]
+        if m != None:
+            to_remove = parsed.rfind(",")
+            parsed = parsed[:to_remove] + parsed[to_remove+1:]
+        parsed += "}"
         debug_print(f"Loading the parsed json:\n{parsed}")
         stream = json.loads(parsed)
 
