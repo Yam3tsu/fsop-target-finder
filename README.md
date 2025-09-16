@@ -76,15 +76,15 @@ There is only one positional argument which is the target function, e.g. the one
 - To pass the stream we can use the keyword STREAM
 
 Examples:
-![Example1](./example_1.png)
+![Example1](./docs_images/example_1.png)
 
-![Example2](./example_2.png)
+![Example2](./docs_images/example_2.png)
 
-![Example3](./example3.png)
+![Example3](./docs_images/example3.png)
 
 By default the stream passed its stderr. If we want to use one of the standard streams (stdin, stdout, stderr) we can quickly do it by the option -std / --standard-stream stream_name. So if we want to fflus(stdout) we can simply use
 
-![Example4](./example4.png)
+![Example4](./docs_images/example4.png)
 
 It's also possible to pass a custom stream. The stream is built by calling fopen(file, "rw"), the file used is a txt file used by the tool to comunicate with `gdb_daemon.py` (be aware, it is not a real daemon. I just run out of fantasy).
 Custom streams has to be passed as json, implementing a specific interface. We can give a look to the interface by the command
@@ -192,7 +192,7 @@ Now we know how to use the tool on exit. We just have to craft a custom stream w
 }
 ```
 Now we can run the tool and get the offset
-![Exit_example](./exit_example.png)
+![Exit_example](./docs_images/exit_example.png)
 
 You could be wondering how the tool has been usefull in this case. We had to dive into libc and understand what function was called by ourself.
 
