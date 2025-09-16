@@ -134,6 +134,72 @@ fsop-target-finder -f {/path/to/file} target(args)
 
 P.S. -f, -s and -std are mutually exclusive. If we try to use them together the tool will stop you.
 
+## The exit() case
+One of the most usefull targets its the exit() function. You can notice that running the tool on exit with defaualt option will not give any result. This happen becouse the exit not always call vtable functions. That's why at the top of this docs I said that this tool doesn't fully replace manual work.
+
+First of all we are intersted on what function which interact with file stream the exit call. It's not very easy to look at it directly in the libc source, luckly debugging the exit with gdb is enough. The plan is to run any binary which is linked to a libc, break on exit and then just let it exit. It's also possible to call exit directly from gdb. Then we just step in until we see some stream function.
+
+After a little bit of step in we found ourself in `_IO_cleanup`. Here it is the back trace:
+```
+__GI_exit -> __run_exit_handlers -> _IO_cleanup
+```
+If you want to know the correspondence in the libc source, in the `__run_exit_handlers` function we can find the following snippet
+```c
+if (run_list_atexit)
+    call_function_static_weak (_IO_cleanup);
+```
+
+Now if we dive into the `_IO_cleanup` we see that it basically is a wrapper for `_IO_flush_all`
+```c
+int
+_IO_cleanup (void)
+{
+  int result = _IO_flush_all ();
+  _IO_unbuffer_all ();
+
+  return result;
+}
+```
+And if we dive into `_IO_flush_all` we will finally find something useful
+```c
+if (((fp->_mode <= 0 && fp->_IO_write_ptr > fp->_IO_write_base) ||
+     (_IO_vtable_offset (fp) == 0 && fp->_mode > 0 && 
+     (fp->_wide_data->_IO_write_ptr > fp->_wide_data->_IO_write_base))
+    ) && _IO_OVERFLOW (fp, EOF) == EOF)
+```
+This snippet it's located inside a for loop wich iterati over all the fp, strating from `_IO_list_all`
+
+`_IO_OVERFLOW` wrap a call to a vtable function. This called is in a conditional statement after an && operator. So to execute that call the condition before the && operator must evaluate `True`.
+
+To achieve this goal we can manipulate the FILE stream such that it satisfy `fp->_mode <= 0 && fp->_IO_write_ptr > fp->_IO_write_base` or `_IO_vtable_offset (fp) == 0 && fp->_mode > 0 && (fp->_wide_data->_IO_write_ptr > fp->_wide_data->_IO_write_base)` or both conditions. Personally I prefer the first one (becouse it's simpler).
+
+Now we know how to use the tool on exit. We just have to craft a custom stream which satisfy these conditions. I used the following stream
+```
+{
+ "_flags": 0,
+ "_IO_read_ptr": 0,
+ "_IO_read_end": 0,
+ "_IO_read_base": 0,
+ "_IO_write_base": 0,
+ "_IO_write_ptr": 1,
+ "_IO_write_end": 0,
+ "_IO_buf_base": 0,
+ "_IO_buf_end": 0,
+ "_IO_save_base": 0,
+ "_IO_backup_base": 0,
+ "_IO_save_end": 0,
+ "_mode" : 0,
+}
+```
+Now we can run the tool and get the offset
+![Exit_example](./exit_example.png)
+
+You could be wondering how the tool has been usefull in this case. We had to dive into libc and understand what function was called by ourself.
+
+Firs of all we safe some minutes by avoiding looking for the offset of that function from the vtable pointer (We would have to dive into the `struct _IO_jump_t`)
+
+The most important reason is that this offset could change from one libc version to another. But rarely the logic of the exit will completely change. A little change in the offset would completly mess up the exploit while a little change on the exit logic would not. Now that we know what the conditions are, and we've built a custom stream wich trigger that call, we can just keep this custom stream and use each time we approch to a different libc. In this way we can istantly get the right offset, avoiding diving on each version of the libc.
+
 ## Warnigs
 If a vtable function is called from a different stream of the given one the tool will not notice the difference and we will get an unexpected result. So we have to be carefull to false positive.
 
