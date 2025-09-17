@@ -1,4 +1,8 @@
 #!/usr/bin/sh
 
+PWD=$(pwd)
+
 make
-sudo ln -f -s $(pwd)/main.py /usr/bin/fsop-target-finder
+sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' ./main.py
+sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' ./gdb_daemon.py
+sudo ln -f -s $PWD/main.py /usr/bin/fsop-target-finder

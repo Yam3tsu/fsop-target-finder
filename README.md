@@ -14,11 +14,15 @@ This tool goal is to understand what function is called for you. So you'll be ab
 I want to underline that the tool can't always replace the manual work, if there are some particular conditions that have to be satisfied the tool will not tell you what they are. But given a FILE struct and a function the tool is very good at telling what will be called from the vtable.
 
 ## How to install
-To install the tool you just need to launch `install.sh`. It's not necessary to clone all the repo, the file that you need are `main.py`, `gdb_daemon.py` and `target` and if you want to install it automatically `install.sh` (it just creates a simlink)
+To install the tool you just need to launch `install.sh`. It's not necessary to clone all the repo, the file that you need are `main.py`, `gdb_daemon.py` and `target` and if you want to install it automatically `install.sh`.
+
+The `install.sh` create a symlink of `main.py` to `/usr/bin/` and insert the installation path in the global variable `INSTALLATION_PATH` in both `main.py` and `gdb_daemon.py`
 
 ## How to use
 ```
-usage: fsop-target-finder [-h] [-s STREAM] [-f STREAM_FILE] [-std {stdin,stdout,stderr}] [--interface] [--libc LIBC] [--linker LINKER] target
+usage: fsop-target-finder [-h] [-s STREAM] [-f STREAM_FILE] [-std {stdin,stdout,stderr}] [-custom {exit}]
+                          [--interface] [--libc LIBC] [--linker LINKER] [-d]
+                          target
 
 Given a libc function which act on file stream, this tool should retrive the offset of the vtable function
 called. The goal is to make FILE struct exploitation easier by avoiding to dive into libc source code
@@ -56,6 +60,14 @@ options:
                         You can get the interface by using fsop-target-finder --interface
                         
   -std {stdin,stdout,stderr}, --standard-stream {stdin,stdout,stderr}
+                        This option allows to quickly use one of the 3 standard stream
+                        
+  -custom {exit}, --custom-stream {exit}
+                        This option allows to use one of the premaid custom streams. 
+                        These streams are located at /home/pwnguy/Tools/fsop/fsop-target-finder/custom_streams/.
+                        An example of premade stream is the exit stream. This is a stream on which exit will call a function from the vtable.
+                        To get more detail about the exit read the docs
+                        
   --interface           Get the interface of the object passed via --stream or --stream-file
                         
   --libc LIBC           Path to the libc used by the binary
@@ -63,6 +75,8 @@ options:
                         
   --linker LINKER       Path to the dynamic loader used by the binary
                         If omitted the system loader will be used /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+                        
+  -d, --debug           Show the debug output. Each debug line is preceded by "[DEBUG]"
 
 ```
 

@@ -3,8 +3,9 @@ import json
 from typing import TypedDict
 import gdb
 
-EXE_FILENAME = "./target"
-PARAMS_FILE = "./param.txt"
+INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop-target-finder"
+EXE_FILENAME = f"{INSTALLATION_PATH}/target"
+PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
 
 # The following regex should parse the parameters from PARAMS_FILE
 LINKER_R = re.compile(r"^Libc: ([a-zA-Z0-9_\.\/-]+)$")
@@ -222,3 +223,4 @@ debug_print(f"Executing the script:\n{call_script}")
 # call_script = "b __run_exit_handlers\n" + call_script
 if INTERACTIVE == False:
     gdb.execute(call_script)
+    print("Error: No vtable function hitted")

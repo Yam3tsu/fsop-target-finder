@@ -6,15 +6,16 @@ import subprocess
 import os
 import re
 
-DAEMON = os.getcwd() + "/gdb_daemon.py"
+INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop-target-finder"
+DAEMON = f"{INSTALLATION_PATH}/gdb_daemon.py"
 OFFSET_R = re.compile(r"^Offset: (0x[0-9a-f]+)$")
 SYMBOL_R = re.compile(r"^Function: ([a-zA-Z_]+)$")
 HEX_IN_JSON_R = re.compile(r'^(\s*"[a-zA-Z0-9_]+": )(0x[0-9a-zA-Z]+),?$')
 JSON_CLOSE_R = re.compile(r"^\s*}\s*$")
-PARAMS_FILE = "./param.txt"
-CUSTOM_STREAMS_PATH = f"{os.getcwd()}/custom_streams/"
+PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
+CUSTOM_STREAMS_PATH = f"{INSTALLATION_PATH}/custom_streams/"
 STD_STREAMS = ["stdin", "stdout", "stderr"]
-DEBUG = True
+DEBUG = False
 
 FIND_TARGET_DESCRIPTION = '''
 Given a libc function which act on file stream, this tool should retrive the offset of the vtable function
@@ -77,6 +78,10 @@ If omitted the system loader will be used /lib/x86_64-linux-gnu/ld-linux-x86-64.
 
 '''
 
+DEBUG_HELP = '''Show the debug output. Each debug line is preceded by "[DEBUG]"
+
+'''
+
 HELP_HELP = '''Show this help message and exit
 
 '''
@@ -136,7 +141,7 @@ def debug_print(s : str):
             print(f"[DEBUG] {line}")
 
 def get_custom_choices():
-    return os.listdir("./custom_streams")
+    return os.listdir(f"{INSTALLATION_PATH}/custom_streams")
 
 if __name__ == "__main__":
 
@@ -151,13 +156,15 @@ if __name__ == "__main__":
     parser.add_argument("--interface", nargs=0, action=ShowInterface, help=INTERFACE_HELP)
     parser.add_argument("--libc", type=str, default="/lib/x86_64-linux-gnu/libc.so.6", help=LIBC_HELP)
     parser.add_argument("--linker", type=str, default="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", help=LINKER_HELP)
-    
+    parser.add_argument("-d", "--debug", action="store_true", default=False, help=DEBUG_HELP)
+
     args = parser.parse_args()
     target = args.target
     stream = args.stream
     std_stream = args.standard_stream
     libc = args.libc
     linker = args.linker
+    DEBUG = args.debug
 
     if args.interface == True:
         print(INTERFACE)
@@ -210,10 +217,21 @@ if __name__ == "__main__":
     update_params(target, libc, linker, stream)
 
     # Run gdb
-    out = subprocess.run(
-        ["gdb", "-q", "--nx", "-ex", "set debuginfod enabled on", "-ex", f"source {DAEMON}"],
-        capture_output=True
-    ).stdout.decode()
+    try:
+        out = subprocess.run(
+            ["gdb", "-q", "--nx", "-ex", "set debuginfod enabled on", "-ex", f"source {DAEMON}"],
+            capture_output=True,
+            timeout=3
+        ).stdout.decode()
+    except subprocess.TimeoutExpired as e:
+        captured = e.stdout.decode()
+        os.system("stty sane")          # Restore the broken terminal
+        debug_print(f"Capture before time out:\n{captured}")
+        if "No vtable function hitted" in captured:
+            print("The function called didn't hit any vtable function")
+        else:
+            print("An error occured during the execution of gdb!")
+        exit(1)
     
     debug_print(f"Output of gdb daemon:\n{out}")
 
