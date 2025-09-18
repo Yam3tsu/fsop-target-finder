@@ -1,4 +1,4 @@
-Libc: libc.so.6
+Libc: /lib/x86_64-linux-gnu/libc.so.6
 Linker: /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-Stream: False
-Call: system(0)
+Stream: {"_flags": 0, "_IO_read_ptr": 0, "_IO_read_end": 0, "_IO_read_base": 0, "_IO_write_base": 0, "_IO_write_ptr": 1, "_IO_write_end": 0, "_IO_buf_base": 0, "_IO_buf_end": 0, "_IO_save_base": 0, "_IO_backup_base": 0, "_IO_save_end": 0, "_mode": 0}
+Call: exit(0)

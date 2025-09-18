@@ -10,7 +10,7 @@ INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop-target-finder"
 DAEMON = f"{INSTALLATION_PATH}/gdb_daemon.py"
 OFFSET_R = re.compile(r"^Offset: (0x[0-9a-f]+)$")
 SYMBOL_R = re.compile(r"^Function: ([a-zA-Z_]+)$")
-HEX_IN_JSON_R = re.compile(r'^(\s*"[a-zA-Z0-9_]+": )(0x[0-9a-zA-Z]+),?$')
+HEX_IN_JSON_R = re.compile(r'^(\s*"[a-zA-Z0-9_]+": )(0x[0-9a-zA-Z]+)(,?)$')
 JSON_CLOSE_R = re.compile(r"^\s*}\s*$")
 PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
 CUSTOM_STREAMS_PATH = f"{INSTALLATION_PATH}/custom_streams/"
@@ -125,6 +125,10 @@ class ShowInterface(argparse.Action):
         print(INTERFACE)
         parser.exit()
 
+class VtableFunctionNotFound(Exception):
+    def __init__(self):
+        super().__init__("Error: vtable function not found")
+
 def update_params(target : str, libc : str, linker : str, stream : dict):
     with open(PARAMS_FILE, "w") as f:
         f.write(f"Libc: {libc}\n")
@@ -142,6 +146,60 @@ def debug_print(s : str):
 
 def get_custom_choices():
     return os.listdir(f"{INSTALLATION_PATH}/custom_streams")
+
+def parse_json(s : str):
+    parsed = ""
+    for line in s.split("\n"):
+        line = line.strip("\n")
+        m = re.match(HEX_IN_JSON_R, line)
+        if m != None:
+            parsed += m.group(1) + str(int(m.group(2)[2:], 16)) + m.group(3) + "\n"
+        else:
+            parsed += line + "\n"
+    parsed = parsed[:-1]
+    debug_print(f"Parsed json:\n{parsed}")
+    return json.loads(parsed)
+
+def get_offset(
+        target,
+        libc="/lib/x86_64-linux-gnu/libc.so.6",
+        linker="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        stream=False,
+        get_symbol=False):
+    update_params(target, libc, linker, stream)
+
+    # Run gdb
+    try:
+        out = subprocess.run(
+            ["gdb", "-q", "--nx", "-ex", "set debuginfod enabled on", "-ex", f"source {DAEMON}"],
+            capture_output=True,
+            timeout=3
+        ).stdout.decode()
+    except subprocess.TimeoutExpired as e:
+        captured = e.stdout.decode()
+        os.system("stty sane")          # Restore the broken terminal
+        debug_print(f"Capture before time out:\n{captured}")
+        if "No vtable function hitted" in captured:
+            raise VtableFunctionNotFound()
+        else:
+            print("An error occured during the execution of gdb!")
+            exit(1)
+    
+    debug_print(f"Output of gdb daemon:\n{out}")
+
+    for line in out.split("\n"):
+        m = re.match(OFFSET_R, line)
+        if m != None:
+            offset = int(m.group(1), 16)
+            continue
+        m = re.match(SYMBOL_R, line)
+        if m != None:
+            symbol = m.group(1)
+    
+    if get_symbol == True:
+        return offset, symbol
+    else:
+        return offset
 
 if __name__ == "__main__":
 
@@ -178,70 +236,13 @@ if __name__ == "__main__":
 
     if std_stream != False:
         assert(stream == False)
+        assert(args.stream_file == False)
         stream = std_stream
-    
+
     if args.stream_file != False:
         assert(stream == False)
         assert(std_stream == False)
-        parsed = "{"
-        lines : list = args.stream_file.readlines()
-        # Removing empty lines
-        while True:
-            try:
-                lines.remove("\n")
-            except:
-                break
-        lines_number = len(lines)
-        counter = 0
-        for line in lines:
-            if re.match(JSON_CLOSE_R, line) != None:
-                break
-            if counter == 0:
-                line = line.replace("{", "")
-            if counter == lines_number - 1:
-                line = line.replace("}", "")
-            counter += 1
-            m = re.match(HEX_IN_JSON_R, line)
-            if m != None:
-                parsed += f"{m.group(1)}{int(m.group(2), 16)},"
-            else:
-                parsed += f"{line}"
-        # We need to remove the last comma or json.loads will cry a river
-        if m != None:
-            to_remove = parsed.rfind(",")
-            parsed = parsed[:to_remove] + parsed[to_remove+1:]
-        parsed += "}"
-        debug_print(f"Loading the parsed json:\n{parsed}")
-        stream = json.loads(parsed)
+        stream = parse_json(args.stream_file.read())
 
-    update_params(target, libc, linker, stream)
-
-    # Run gdb
-    try:
-        out = subprocess.run(
-            ["gdb", "-q", "--nx", "-ex", "set debuginfod enabled on", "-ex", f"source {DAEMON}"],
-            capture_output=True,
-            timeout=3
-        ).stdout.decode()
-    except subprocess.TimeoutExpired as e:
-        captured = e.stdout.decode()
-        os.system("stty sane")          # Restore the broken terminal
-        debug_print(f"Capture before time out:\n{captured}")
-        if "No vtable function hitted" in captured:
-            print("The function called didn't hit any vtable function")
-        else:
-            print("An error occured during the execution of gdb!")
-        exit(1)
-    
-    debug_print(f"Output of gdb daemon:\n{out}")
-
-    for line in out.split("\n"):
-        m = re.match(OFFSET_R, line)
-        if m != None:
-            offset = int(m.group(1), 16)
-            continue
-        m = re.match(SYMBOL_R, line)
-        if m != None:
-            symbol = m.group(1)
-    
+    offset, symbol = get_offset(target, libc, linker, stream, get_symbol=True)
     print(f"Offset: {hex(offset)}\nSymbol: {symbol}")
