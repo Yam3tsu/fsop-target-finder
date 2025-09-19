@@ -10,13 +10,10 @@ PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
 # The following regex should parse the parameters from PARAMS_FILE
 LINKER_R = re.compile(r"^Libc: ([a-zA-Z0-9_\.\/-]+)$")
 LIBC_R = re.compile(r"^Linker: ([a-zA-Z0-9_\.\/-]+)$")
-STREAM_R = re.compile(r"^Stream: (.+)$")
-GDB_CALL_R = re.compile(r"^\$[0-9]+ = \(FILE \*\) (0x[0-9a-f]+)$")
 
 VTABLES_NUM = 17
 JUMP_T_SIZE = 0xa8
 VTABLE_LEN = VTABLES_NUM * JUMP_T_SIZE
-STD_STREAMS = ["stdin", "stdout", "stderr"]
 
 STOP_AT_FIRST = False
 DEBUG = True
@@ -87,37 +84,6 @@ def debug_print(s : str):
     if DEBUG == True:
         for line in s.split("\n"):
             print(f"[DAEMON_DEBUG] {line}")
-
-def parse_stream():
-    if STREAM == False:
-        gdb.execute("set $stream = stderr")
-    elif STREAM in STD_STREAMS:
-        gdb.execute(f"set $stream = {STREAM}")
-    elif check_stream(Stream) or STRONG_CHECK == False:        
-        # Parse the new stream address
-        gdb_stream = gdb.execute(f"call fopen(\"{PARAMS_FILE}\", \"rw\")", to_string=True)
-        m = re.match(GDB_CALL_R, gdb_stream)
-        if m == None:
-            print("There was a problem with the fopen call!")
-            exit(1)
-        gdb_stream_address = int(m.group(1), 16)
-        gdb.execute(f"set $stream = (FILE *){hex(gdb_stream_address)}")
-
-        # Overwrite the new file stream with the one given in input
-        for element in STREAM:
-            if element == "_unused2":
-                unused_list = "{"
-                for elem in STREAM[element]:
-                    unused_list += f"{elem}, "
-                unused_list = unused_list[:-2] + "}"
-                gdb.execute(f"set (char [20])$stream->_unused2 = {unused_list}")
-            elif element == "vtable":
-                gdb.execute(f"set ((struct _IO_FILE_plus *)$stream)->{element} = {hex(STREAM[element])}")
-            else:
-                gdb.execute(f"set $stream->{element} = {hex(STREAM[element])}")
-    else:
-        print("Invalid stream!")
-        gdb.execute("quit", to_string=True)
         
 
 # Parse parameters from param file
@@ -133,21 +99,10 @@ for line in lines:
     if m != None:
         LIBC = m.group(1)
         continue
-    m = re.match(STREAM_R, line)
-    if m != None:
-        value = m.group(1)
-        if value == "False":
-            STREAM = "stderr"
-        elif value in STD_STREAMS:
-            STREAM = value
-        else:
-            STREAM = json.loads(value)
         
 
 assert("LINKER" in globals())
 assert("LIBC" in globals())
-# assert("VTABLE" in globals())
-assert("STREAM" in globals())
 
 INIT_SCRIPT = f'''
     file {EXE_FILENAME}
@@ -156,9 +111,9 @@ INIT_SCRIPT = f'''
 '''
 
 gdb.execute(INIT_SCRIPT, to_string=True)
-parse_stream()
-gdb.execute("set $vtable = (long)((struct _IO_FILE_plus *)$stream)->vtable")
-vtable = gdb.parse_and_eval("$vtable")
+gdb.execute("setbase")
+libc_base = gdb.parse_and_eval("(long)$libc_base")
+print(libc_base)
 
 vtable_start = gdb.parse_and_eval("(long)__io_vtables")
 vtable_end = vtable_start + VTABLE_LEN
@@ -172,7 +127,7 @@ for addr in range(vtable_start, vtable_end, 0x8):
     if block.function:
         symbol = block.function.print_name
         if symbol == "_IO_wfile_overflow" or symbol == "__GI__IO_wfile_overflow":
-            print(f"Offset: {hex(addr - vtable)}")
+            print(f"Offset: {hex(addr - libc_base)}")
             if STOP_AT_FIRST == True and INTERACTIVE == False:
                 gdb.execute("quit", to_string = True)
 

@@ -3,5 +3,6 @@
 PWD=$(pwd)
 
 make -C $PWD/src --quiet
-sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' $PWD/src/constants.py
+sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' $PWD/src/modules/constants.py
 sudo ln -f -s $PWD/src/find_vtable_offset.py /usr/bin/fsop-target-finder
+sudo ln -f -s $PWD/src/find_wfile_overflow.py /usr/bin/fsop-wfile-overflow-finder

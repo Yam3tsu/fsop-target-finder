@@ -14,11 +14,12 @@ VTABLE_LEN = VTABLES_NUM * JUMP_T_SIZE
 STD_STREAMS = ["stdin", "stdout", "stderr"]
 
 STRONG_CHECK = False
-DEBUG = True
+DEBUG = False
 INTERACTIVE = False
 
-VTABLE_OFFSET_DAEMON = f"{INSTALLATION_PATH}/src/gdb_find_vtable_offset.py"
-FIND_WFILE_OVERFLOW_DAEMON = f"{INSTALLATION_PATH}/src/gdb_find_wfile_overflow.py"
+VTABLE_OFFSET_DAEMON = f"{INSTALLATION_PATH}/src/modules/gdb_find_vtable_offset.py"
+FIND_WFILE_OVERFLOW_DAEMON = f"{INSTALLATION_PATH}/src/modules/gdb_find_wfile_overflow.py"
+BASE_ADDR_DAEMON = f"{INSTALLATION_PATH}/src/modules/gdb_libc_base.py"
 
 class Stream(TypedDict):
     _flags : int
