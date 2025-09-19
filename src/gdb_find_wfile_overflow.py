@@ -3,7 +3,7 @@ import json
 from typing import TypedDict
 import gdb
 
-INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop-target-finder"
+INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop_target_finder"
 EXE_FILENAME = f"{INSTALLATION_PATH}/target"
 PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
 
@@ -11,23 +11,17 @@ PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
 LINKER_R = re.compile(r"^Libc: ([a-zA-Z0-9_\.\/-]+)$")
 LIBC_R = re.compile(r"^Linker: ([a-zA-Z0-9_\.\/-]+)$")
 STREAM_R = re.compile(r"^Stream: (.+)$")
-CALL_R = re.compile(r"^Call: (.+)\((.*)\)$")
-
-# This regex should parse the output of gdb.execute("call ...")
 GDB_CALL_R = re.compile(r"^\$[0-9]+ = \(FILE \*\) (0x[0-9a-f]+)$")
-
-# The following regex are used to parse CALL
-PARSE_CALL_ARGUMENTS_R = re.compile(r"\s*(BUFFER(?:\[(?:[0-9]+|0x[0-9a-fA-F]+)\])?|STREAM|0x[0-9a-fA-F]+|\d+)\s*,?")
-DEFINED_BUFFER_R = re.compile(r"^BUFFER\[(0x[0-9a-fA-F]+|\d+)\]$")
 
 VTABLES_NUM = 17
 JUMP_T_SIZE = 0xa8
 VTABLE_LEN = VTABLES_NUM * JUMP_T_SIZE
 STD_STREAMS = ["stdin", "stdout", "stderr"]
 
-STRONG_CHECK = False
+STOP_AT_FIRST = False
 DEBUG = True
 INTERACTIVE = False
+STRONG_CHECK = False
 
 # Stream interface
 class Stream(TypedDict):
@@ -82,11 +76,6 @@ class Vtable_Breakpoint(gdb.Breakpoint):
         gdb.execute("quit", to_string=True)
         return True
 
-def debug_print(s : str):
-    if DEBUG == True:
-        for line in s.split("\n"):
-            print(f"[DAEMON_DEBUG] {line}")
-
 def check_stream(stream : dict):
     try:
         Stream(**stream)
@@ -94,8 +83,11 @@ def check_stream(stream : dict):
     except:
         return False
 
-# Parse the stream and include it in gdb
-# The plan is to create a temporary stream using fopen and then overwriting it
+def debug_print(s : str):
+    if DEBUG == True:
+        for line in s.split("\n"):
+            print(f"[DAEMON_DEBUG] {line}")
+
 def parse_stream():
     if STREAM == False:
         gdb.execute("set $stream = stderr")
@@ -126,37 +118,6 @@ def parse_stream():
     else:
         print("Invalid stream!")
         gdb.execute("quit", to_string=True)
-    
-def parse_call(function : str, arguments : str):
-    allocation_script = ""
-    allocation_counter = 0
-    call = f"call {function}("
-    debug_print(f"Arguments: {arguments}")
-    m = re.findall(PARSE_CALL_ARGUMENTS_R, arguments)
-    debug_print(f"Parsed args: {m}")
-    if len(m) == 0:
-        return call + ")"
-    for arg in m:
-        if arg == "STREAM":
-            call += "$stream, "
-        elif arg == "BUFFER":
-            allocation_script += f"set $buffer{allocation_counter} = malloc(0x10)\n"
-            call += f"$buffer{allocation_counter}, "
-            allocation_counter += 1
-        elif "BUFFER" in arg:
-            size = re.match(DEFINED_BUFFER_R, arg).group(1)
-            if "0x" in size:
-                size = int(size[2:], 16)
-            else:
-                size = int(size)
-            allocation_script += f"set $buffer{allocation_counter} = malloc({size})\n"
-            call += f"$buffer{allocation_counter}, "
-            allocation_counter += 1
-        else:
-            call += f"{arg}, "
-    call = call[:-2] + ")"
-    debug_print(f"Parsed script: {allocation_script + call}")
-    return allocation_script + call
         
 
 # Parse parameters from param file
@@ -174,20 +135,18 @@ for line in lines:
         continue
     m = re.match(STREAM_R, line)
     if m != None:
-        if m.group(1) == "False":
-            STREAM = False
-        elif m.group(1) in STD_STREAMS:
-            STREAM = m.group(1)
+        value = m.group(1)
+        if value == "False":
+            STREAM = "stderr"
+        elif value in STD_STREAMS:
+            STREAM = value
         else:
-            STREAM = json.loads(m.group(1))
-    m = re.match(CALL_R, line)
-    if m != None:
-        CALL = m.group(1)
-        CALL_ARGS = m.group(2)
+            STREAM = json.loads(value)
+        
 
-debug_print(f"Call: {CALL}")
 assert("LINKER" in globals())
 assert("LIBC" in globals())
+# assert("VTABLE" in globals())
 assert("STREAM" in globals())
 
 INIT_SCRIPT = f'''
@@ -197,16 +156,13 @@ INIT_SCRIPT = f'''
 '''
 
 gdb.execute(INIT_SCRIPT, to_string=True)
-
 parse_stream()
-
-debug_print(f"Using the stream: {gdb.parse_and_eval("$stream")}")
-
-call_script = parse_call(m.group(1), m.group(2))
+gdb.execute("set $vtable = (long)((struct _IO_FILE_plus *)$stream)->vtable")
+vtable = gdb.parse_and_eval("$vtable")
 
 vtable_start = gdb.parse_and_eval("(long)__io_vtables")
 vtable_end = vtable_start + VTABLE_LEN
-vtable_stream = gdb.parse_and_eval("(long)((struct _IO_FILE_plus *)$stream)->vtable")
+vtable_stream = gdb.parse_and_eval("$vtable")
 
 for addr in range(vtable_start, vtable_end, 0x8):
     f_addr = gdb.Value(addr).cast(gdb.lookup_type("long").pointer()).dereference()
@@ -215,12 +171,10 @@ for addr in range(vtable_start, vtable_end, 0x8):
         continue
     if block.function:
         symbol = block.function.print_name
-        Vtable_Breakpoint(f"*{hex(f_addr)}", symbol=symbol, offset=(addr - vtable_stream), internal=True)
+        if symbol == "_IO_wfile_overflow" or symbol == "__GI__IO_wfile_overflow":
+            print(f"Offset: {hex(addr - vtable)}")
+            if STOP_AT_FIRST == True and INTERACTIVE == False:
+                gdb.execute("quit", to_string = True)
 
-# gdb.execute("source tmp_file.txt")
-debug_print(f"Executing the script:\n{call_script}")
-
-# call_script = "b __run_exit_handlers\n" + call_script
 if INTERACTIVE == False:
-    gdb.execute(call_script)
-    print("Error: No vtable function hitted")
+    gdb.execute("quit", to_string = True)

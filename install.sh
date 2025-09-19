@@ -2,7 +2,6 @@
 
 PWD=$(pwd)
 
-make
-sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' $PWD/main.py
-sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' $PWD/gdb_daemon.py
-sudo ln -f -s $PWD/main.py /usr/bin/fsop-target-finder
+make -C $PWD/src --quiet
+sed -i -E 's|^(INSTALLATION_PATH = )".*"$|\1"'"$PWD"'"|' $PWD/src/constants.py
+sudo ln -f -s $PWD/src/find_vtable_offset.py /usr/bin/fsop-target-finder

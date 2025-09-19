@@ -5,17 +5,14 @@ import json
 import subprocess
 import os
 import re
+from constants import VTABLE_OFFSET_DAEMON as DAEMON, DEBUG, STD_STREAMS, DEFAULT_LIBC, DEFAULT_LINKER, INSTALLATION_PATH, \
+                      PARAMS_FILE, get_custom_streams as get_custom_choices, CUSTOM_STREAMS_PATH, STD_STREAMS
 
-INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop-target-finder"
-DAEMON = f"{INSTALLATION_PATH}/gdb_daemon.py"
+
 OFFSET_R = re.compile(r"^Offset: (0x[0-9a-f]+)$")
 SYMBOL_R = re.compile(r"^Function: ([a-zA-Z_]+)$")
 HEX_IN_JSON_R = re.compile(r'^(\s*"[a-zA-Z0-9_]+": )(0x[0-9a-zA-Z]+)(,?)$')
 JSON_CLOSE_R = re.compile(r"^\s*}\s*$")
-PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
-CUSTOM_STREAMS_PATH = f"{INSTALLATION_PATH}/custom_streams/"
-STD_STREAMS = ["stdin", "stdout", "stderr"]
-DEBUG = False
 
 FIND_TARGET_DESCRIPTION = '''
 Given a libc function which act on file stream, this tool should retrive the offset of the vtable function
@@ -129,7 +126,7 @@ class VtableFunctionNotFound(Exception):
     def __init__(self):
         super().__init__("Error: vtable function not found")
 
-def update_params(target : str, libc : str, linker : str, stream : dict):
+def update_params(target : str, libc : str, linker : str, stream : dict | str | bool):
     with open(PARAMS_FILE, "w") as f:
         f.write(f"Libc: {libc}\n")
         f.write(f"Linker: {linker}\n")
@@ -161,11 +158,14 @@ def parse_json(s : str):
     return json.loads(parsed)
 
 def get_offset(
-        target,
-        libc="/lib/x86_64-linux-gnu/libc.so.6",
-        linker="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
-        stream=False,
-        get_symbol=False):
+        target : str,
+        libc : str = DEFAULT_LIBC,
+        linker : str = DEFAULT_LINKER,
+        stream : bool | str | dict = False,
+        get_symbol : bool = False):
+    if stream in get_custom_choices():
+        with open(CUSTOM_STREAMS_PATH + stream) as f:
+            stream = parse_json(f.read())
     update_params(target, libc, linker, stream)
 
     # Run gdb
@@ -176,10 +176,11 @@ def get_offset(
             timeout=3
         ).stdout.decode()
     except subprocess.TimeoutExpired as e:
-        captured = e.stdout.decode()
+        captured_err = e.stderr.decode()
+        captured_out = e.stdout.decode()
         os.system("stty sane")          # Restore the broken terminal
-        debug_print(f"Capture before time out:\n{captured}")
-        if "No vtable function hitted" in captured:
+        debug_print(f"Capture before time out:\nstdout: {captured_out}\nstderr: {captured_err}")
+        if "No vtable function hitted" in captured_out:
             raise VtableFunctionNotFound()
         else:
             print("An error occured during the execution of gdb!")
@@ -212,8 +213,8 @@ if __name__ == "__main__":
     parser.add_argument("-std", "--standard-stream", type=str, choices=["stdin", "stdout", "stderr"], default=False, help=STD_HELP)
     parser.add_argument("-custom", "--custom-stream", type=str, choices=get_custom_choices(), default=False, help=CUSTOM_HELP)
     parser.add_argument("--interface", nargs=0, action=ShowInterface, help=INTERFACE_HELP)
-    parser.add_argument("--libc", type=str, default="/lib/x86_64-linux-gnu/libc.so.6", help=LIBC_HELP)
-    parser.add_argument("--linker", type=str, default="/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", help=LINKER_HELP)
+    parser.add_argument("--libc", type=str, default=DEFAULT_LIBC, help=LIBC_HELP)
+    parser.add_argument("--linker", type=str, default=DEFAULT_LINKER, help=LINKER_HELP)
     parser.add_argument("-d", "--debug", action="store_true", default=False, help=DEBUG_HELP)
 
     args = parser.parse_args()
@@ -232,7 +233,7 @@ if __name__ == "__main__":
         assert(stream == False)
         assert(std_stream == False)
         assert(args.stream_file == False)
-        args.stream_file = open(CUSTOM_STREAMS_PATH + args.custom_stream, "r")
+        stream = args.custom_stream
 
     if std_stream != False:
         assert(stream == False)
