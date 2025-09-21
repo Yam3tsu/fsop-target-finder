@@ -1,4 +1,0 @@
-Libc: /lib/x86_64-linux-gnu/libc.so.6
-Linker: /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-Stream: False
-Call: fflush(STREAM)
