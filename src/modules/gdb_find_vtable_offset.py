@@ -1,11 +1,14 @@
 import re
 import json
-from typing import TypedDict
+import sys
 import gdb
 
 INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop_target_finder"
-EXE_FILENAME = f"{INSTALLATION_PATH}/target"
-PARAMS_FILE = f"{INSTALLATION_PATH}/param.txt"
+
+sys.path.append(f"{INSTALLATION_PATH}/src/modules")
+from constants import PARAMS_FILE, STRONG_CHECK, DEBUG, INTERACTIVE, \
+                      STD_STREAMS, VTABLE_LEN, INIT_SCRIPT, check_stream, \
+                      gdb_debug_print as debug_print
 
 # The following regex should parse the parameters from PARAMS_FILE
 LINKER_R = re.compile(r"^Libc: ([a-zA-Z0-9_\.\/-]+)$")
@@ -20,51 +23,12 @@ GDB_CALL_R = re.compile(r"^\$[0-9]+ = \(FILE \*\) (0x[0-9a-f]+)$")
 PARSE_CALL_ARGUMENTS_R = re.compile(r"\s*(BUFFER(?:\[(?:[0-9]+|0x[0-9a-fA-F]+)\])?|STREAM|0x[0-9a-fA-F]+|\d+)\s*,?")
 DEFINED_BUFFER_R = re.compile(r"^BUFFER\[(0x[0-9a-fA-F]+|\d+)\]$")
 
-VTABLES_NUM = 17
-JUMP_T_SIZE = 0xa8
-VTABLE_LEN = VTABLES_NUM * JUMP_T_SIZE
-STD_STREAMS = ["stdin", "stdout", "stderr"]
-
-STRONG_CHECK = False
-DEBUG = True
-INTERACTIVE = False
-
-# Stream interface
-class Stream(TypedDict):
-    _flags : int
-    _IO_read_ptr : int
-    _IO_read_end : int
-    _IO_read_base : int
-    _IO_write_base : int
-    _IO_write_ptr : int
-    _IO_write_end : int
-    _IO_buf_base : int
-    _IO_buf_end : int
-    _IO_save_base : int
-    _IO_backup_base : int
-    _IO_save_end : int
-    _markers : int
-    _chain : int
-    _fileno : int
-    _flags2 : int
-    _old_offset : int
-    _cur_column : int
-    _vtable_offset : int
-    _shortbuf : int
-    _lock : int
-    _offset : int
-    _codecvt : int
-    _wide_data : int
-    _freeres_list : int
-    _freeres_buf : int
-    __pad5 : int
-    _mode : int
-    _unused2 : bytes
-    vtable : int
-
 
 class Vtable_Breakpoint(gdb.Breakpoint):
-    
+    """
+    This breakpoint is setted on vtable entries.\n
+    When hitted it print the offset of the entry and then execute quit on gdb
+    """
     def __init__(self, spec, symbol : str = None, offset : int = None, **kwargs):
         super().__init__(spec, **kwargs)
         self.addr = int(spec[3:], 16)
@@ -82,26 +46,18 @@ class Vtable_Breakpoint(gdb.Breakpoint):
         gdb.execute("quit", to_string=True)
         return True
 
-def debug_print(s : str):
-    if DEBUG == True:
-        for line in s.split("\n"):
-            print(f"[DAEMON_DEBUG] {line}")
-
-def check_stream(stream : dict):
-    try:
-        Stream(**stream)
-        return True
-    except:
-        return False
-
-# Parse the stream and include it in gdb
-# The plan is to create a temporary stream using fopen and then overwriting it
 def parse_stream():
+    """
+    This function should parse the STREAM and then include it in gdb.\n
+    To include in gdb it will call fopen("param.txt", "rw"), where param is just a placeholder txt file.\n
+    A referement to the stream will be stored in the gdb $stream variable
+    """
+
     if STREAM == False:
         gdb.execute("set $stream = stderr")
     elif STREAM in STD_STREAMS:
         gdb.execute(f"set $stream = {STREAM}")
-    elif check_stream(Stream) or STRONG_CHECK == False:        
+    elif check_stream(STREAM) or STRONG_CHECK == False:        
         # Parse the new stream address
         gdb_stream = gdb.execute(f"call fopen(\"{PARAMS_FILE}\", \"rw\")", to_string=True)
         m = re.match(GDB_CALL_R, gdb_stream)
@@ -128,6 +84,16 @@ def parse_stream():
         gdb.execute("quit", to_string=True)
     
 def parse_call(function : str, arguments : str):
+    """
+    This function should take in input a libc function and its arguments.\n
+    The arguments can be hardcoded integer, the literal "BUFFER", a string of the type
+    BUFFER[Size] or the literal "STREAM".\n
+    It will create a gdb script which will allocate the BUFFERs and call the function, replacing
+    BUFFERs with their referement, STREAM with a referement to the stream and the other arguments will be
+    left unchanged.\n
+    BUFFERs will be allocated by "malloc(Size)", if Size is not given it will be allocated a 0x10 bytes buffer.
+    """
+
     allocation_script = ""
     allocation_counter = 0
     call = f"call {function}("
@@ -190,12 +156,6 @@ assert("LINKER" in globals())
 assert("LIBC" in globals())
 assert("STREAM" in globals())
 
-INIT_SCRIPT = f'''
-    file {EXE_FILENAME}
-    b main
-    run {LINKER} --library-path {LIBC} {EXE_FILENAME}
-'''
-
 gdb.execute(INIT_SCRIPT, to_string=True)
 
 parse_stream()
@@ -204,11 +164,16 @@ debug_print(f"Using the stream: {gdb.parse_and_eval("$stream")}")
 
 call_script = parse_call(m.group(1), m.group(2))
 
-vtable_start = gdb.parse_and_eval("(long)__io_vtables")
-vtable_end = vtable_start + VTABLE_LEN
+try:
+    vtable_start = gdb.parse_and_eval("(long)__io_vtables")
+    vtable_end = vtable_start + VTABLE_LEN
+except:
+    vtable_start = gdb.parse_and_eval("(long)__start___libc_IO_vtables")
+    vtable_end = gdb.parse_and_eval("(long)__stop___libc_IO_vtables")
+
 vtable_stream = gdb.parse_and_eval("(long)((struct _IO_FILE_plus *)$stream)->vtable")
 
-for addr in range(vtable_start, vtable_end, 0x8):
+for addr in range(vtable_stream, vtable_end, 0x8):
     f_addr = gdb.Value(addr).cast(gdb.lookup_type("long").pointer()).dereference()
     block = gdb.block_for_pc(f_addr)
     if block == None:
@@ -217,10 +182,8 @@ for addr in range(vtable_start, vtable_end, 0x8):
         symbol = block.function.print_name
         Vtable_Breakpoint(f"*{hex(f_addr)}", symbol=symbol, offset=(addr - vtable_stream), internal=True)
 
-# gdb.execute("source tmp_file.txt")
 debug_print(f"Executing the script:\n{call_script}")
 
-# call_script = "b __run_exit_handlers\n" + call_script
 if INTERACTIVE == False:
     gdb.execute(call_script)
     print("Error: No vtable function hitted")

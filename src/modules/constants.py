@@ -1,5 +1,6 @@
 import os
-from typing import TypedDict
+from typing import TypedDict, get_type_hints
+import subprocess
 
 INSTALLATION_PATH = "/home/pwnguy/Tools/fsop/fsop_target_finder"
 EXE_FILENAME = f"{INSTALLATION_PATH}/target"
@@ -13,7 +14,7 @@ JUMP_T_SIZE = 0xa8
 VTABLE_LEN = VTABLES_NUM * JUMP_T_SIZE
 STD_STREAMS = ["stdin", "stdout", "stderr"]
 
-STRONG_CHECK = False
+STRONG_CHECK = True
 DEBUG = False
 INTERACTIVE = False
 
@@ -21,7 +22,19 @@ VTABLE_OFFSET_DAEMON = f"{INSTALLATION_PATH}/src/modules/gdb_find_vtable_offset.
 FIND_WFILE_OVERFLOW_DAEMON = f"{INSTALLATION_PATH}/src/modules/gdb_find_wfile_overflow.py"
 BASE_ADDR_DAEMON = f"{INSTALLATION_PATH}/src/modules/gdb_libc_base.py"
 
+INIT_SCRIPT = f'''
+    file {EXE_FILENAME}
+    b main
+    run
+'''
+
 class Stream(TypedDict):
+    """
+    The interface of the Stream object.
+    
+    This interface is used to check if a given stream is coerent with the C FILE struct.
+    """
+
     _flags : int
     _IO_read_ptr : int
     _IO_read_end : int
@@ -54,4 +67,69 @@ class Stream(TypedDict):
     vtable : int
 
 def get_custom_streams():
+    """
+    Retrive the list of custom streams currently aviable
+    """
     return os.listdir(f"{CUSTOM_STREAMS_PATH}")
+
+def debug_print(s : str):
+    """
+    Print a debug message only if the flag DEBUG = True.
+    """
+    if DEBUG == True:
+        for line in s.split("\n"):
+            print(f"[DEBUG] {line}")
+
+def gdb_debug_print(s : str):
+    """
+    It's similar to debug print, but it uses a different prefix.
+    
+    Used in gdb python scripts.
+    """
+    if DEBUG == True:
+        for line in s.split("\n"):
+            print(f"[DAEMON DEBUG] {line}")
+
+def compile_target(libc : str = DEFAULT_LIBC, linker : str = DEFAULT_LINKER):
+    """
+    It compile the target binary using the given libc and linker.
+
+    - libc -- The full path of the libc to use to copmile target.
+
+    - linker -- The full path of the dynamic linker to use to compile target.
+    It's necessary that it is compatible with the libc given.
+    """
+
+    libc = os.path.dirname(libc)
+    if DEBUG == True:
+        return subprocess.run([
+        "make",
+        f"LIBC_PATH={libc}",
+        f"LD={linker}",
+        f"-C",
+        f"{INSTALLATION_PATH}/src",
+        "all",
+    ]).returncode
+    return subprocess.run([
+        "make",
+        f"LIBC_PATH={libc}",
+        f"LD={linker}",
+        f"-C",
+        f"{INSTALLATION_PATH}/src",
+        "--quiet",
+        "all",
+    ],
+    capture_output=True).returncode
+
+def check_stream(stream : dict | Stream):
+    """
+    Check if the given stream correctly implements the Stream interface.
+    
+    - stream -- The stream to check
+    """
+
+    props = get_type_hints(Stream)
+    for elem in stream:
+        if not elem in props:
+            return False
+    return True

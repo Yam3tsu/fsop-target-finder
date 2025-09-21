@@ -1,4 +1,7 @@
 import gdb
+import re
+
+LIBC_RE = re.compile(r"^(?:\s*0x[0-9a-fA-F]+){4}\s*[rwxp-]{4}\s*(?:\/.*)\/libc-(?:2|1)\.[0-9]{1,2}\.so$")
 
 class GetBaseAddress(gdb.Command):
 
@@ -40,7 +43,9 @@ class GetBaseAddress(gdb.Command):
             return
         lines = maps.split("\n")[4:]
         for line in lines:
-            if "libc.so.6" in line:
+            print(re.match(LIBC_RE, line.strip()))
+            print(line)
+            if "libc.so.6" in line or re.match(LIBC_RE, line.strip()) != None:
                 addr = line[line.find("0"):]
                 addr = addr[:addr.find(" ")]
                 addr = int(addr, 16)
