@@ -20,9 +20,9 @@ The `install.sh` create a symlink of `main.py` to `/usr/bin/` and insert the ins
 
 ## How to use
 ```
-usage: fsop-target-finder [-h] [-s STREAM] [-f STREAM_FILE] [-std {stdin,stdout,stderr}] [-custom {exit}]
-                          [--interface] [--libc LIBC] [--linker LINKER] [-d]
-                          target
+usage: fsop-find-vtable-offset [-h] [-s STREAM] [-f STREAM_FILE] [-std {stdin,stdout,stderr}] [-custom {exit}] [--interface]
+                               [--libc LIBC] [--linker LINKER]
+                               target
 
 Given a libc function which act on file stream, this tool should retrive the offset of the vtable function
 called. The goal is to make FILE struct exploitation easier by avoiding to dive into libc source code
@@ -44,27 +44,27 @@ options:
                         The FILE stream which will be passed to the target function call
                         The stream has to be passed as a json (you can obtain the ideal formatting by using json.dumps(dictionary) in python)
                         This json has to be an implementation of a specific interface.
-                        You can get the interface using fsop-target-finder --interface
+                        You can get the interface using fsop-find-vtable-offset --interface
                         
                         It's possible to not include all the fields.
                         In that case the omitted fields will have the value of the stream generated with fopen(file_name, "rw")
                         
                         Example:
-                        fsop-target-finder fwrite(BUFFER, 0x10, 0x1, STREAM) -s '{"_flags": 0xfbad0000, "_IO_read_ptr": 0xdeadbeef}'
+                        fsop-find-vtable-offset fwrite(BUFFER, 0x10, 0x1, STREAM) -s '{"_flags": 0xfbad0000, "_IO_read_ptr": 0xdeadbeef}'
                         
                         If omitted it will be replaced with stderr
                         
   -f STREAM_FILE, --stream-file STREAM_FILE
                         The path of a file containing a json representing the FILE stream
                         The json sohuld be an implementation of a specific interface.
-                        You can get the interface by using fsop-target-finder --interface
+                        You can get the interface by using fsop-find-vtable-offset --interface
                         
   -std {stdin,stdout,stderr}, --standard-stream {stdin,stdout,stderr}
                         This option allows to quickly use one of the 3 standard stream
                         
   -custom {exit}, --custom-stream {exit}
                         This option allows to use one of the premaid custom streams. 
-                        These streams are located at /home/pwnguy/Tools/fsop/fsop-target-finder/custom_streams/.
+                        These streams are located at /home/pwnguy/Tools/fsop/fsop_target_finder/custom_streams.
                         An example of premade stream is the exit stream. This is a stream on which exit will call a function from the vtable.
                         To get more detail about the exit read the docs
                         
@@ -75,8 +75,6 @@ options:
                         
   --linker LINKER       Path to the dynamic loader used by the binary
                         If omitted the system loader will be used /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-                        
-  -d, --debug           Show the debug output. Each debug line is preceded by "[DEBUG]"
 
 ```
 
@@ -90,15 +88,31 @@ There is only one positional argument which is the target function, e.g. the one
 - To pass the stream we can use the keyword STREAM
 
 Examples:
-![Example1](./docs_images/example_1.png)
+```sh
+fsop-find-vtable-offset "fwrite(BUFFER[0x20], 0x20, 1, STREAM)"
+Offset: 0x38
+Symbol: _IO_new_file_xsputn
+```
 
-![Example2](./docs_images/example_2.png)
+```sh
+fsop-find-vtable-offset "putchar(0x10)" -std stdout
+Offset: 0x18
+Symbol: _IO_new_file_overflow
+```
 
-![Example3](./docs_images/example3.png)
+```sh
+fsop-find-vtable-offset "fflush(STREAM)"
+Offset: 0x60
+Symbol: _IO_new_file_sync
+```
 
 By default the stream passed its stderr. If we want to use one of the standard streams (stdin, stdout, stderr) we can quickly do it by the option -std / --standard-stream stream_name. So if we want to fflus(stdout) we can simply use
 
-![Example4](./docs_images/example4.png)
+```sh
+fsop-find-vtable-offset "fflush(STREAM)" -std stdout
+Offset: 0x60
+Symbol: _IO_new_file_sync
+```
 
 It's also possible to pass a custom stream. The stream is built by calling fopen(file, "rw"), the file used is a txt file used by the tool to comunicate with `gdb_daemon.py` (be aware, it is not a real daemon. I just run out of fantasy).
 Custom streams has to be passed as json, implementing a specific interface. We can give a look to the interface by the command
@@ -205,8 +219,13 @@ Now we know how to use the tool on exit. We just have to craft a custom stream w
  "_mode" : 0,
 }
 ```
+This custom file is alredy included in the tool, so we can use `-custom exit` instead of passing the file.
 Now we can run the tool and get the offset
-![Exit_example](./docs_images/exit_example.png)
+```sh
+fsop-find-vtable-offset -custom exit "exit(0)"
+Offset: 0x18
+Symbol: _IO_new_file_overflow
+```
 
 You could be wondering how the tool has been usefull in this case. We had to dive into libc and understand what function was called by ourself.
 

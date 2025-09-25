@@ -164,6 +164,8 @@ debug_print(f"Using the stream: {gdb.parse_and_eval("$stream")}")
 
 call_script = parse_call(m.group(1), m.group(2))
 
+# Some libc have the symbol __io_vtables which point to the start of the vtable area.
+# Others have the symbols __start___libc_IO_vtables and __stop___libc_IO_vtables
 try:
     vtable_start = gdb.parse_and_eval("(long)__io_vtables")
     vtable_end = vtable_start + VTABLE_LEN

@@ -127,7 +127,6 @@ if __name__ == "__main__":
     parser.add_argument("--interface", nargs=0, action=ShowInterface, help=INTERFACE_HELP)
     parser.add_argument("--libc", type=str, default=DEFAULT_LIBC, help=LIBC_HELP)
     parser.add_argument("--linker", type=str, default=DEFAULT_LINKER, help=LINKER_HELP)
-    parser.add_argument("-d", "--debug", action="store_true", default=False, help=DEBUG_HELP)
 
     args = parser.parse_args()
     target = args.target
@@ -135,7 +134,6 @@ if __name__ == "__main__":
     std_stream = args.standard_stream
     libc = args.libc
     linker = args.linker
-    DEBUG = args.debug
 
     if args.interface == True:
         print(INTERFACE)
